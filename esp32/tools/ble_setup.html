@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<!--
+  Phone setup for Qoduck over Web Bluetooth.
+
+  Talks to the GATT service in components/muse/muse_ble.h:
+    CMD    4d757365-0002-4000-8000-6a6f6c6c7900  write "key=value"
+    STATUS 4d757365-0003-4000-8000-6a6f6c6c7900  notify JSON
+
+  Web Bluetooth needs a secure context: https, or http://localhost. On a phone
+  use the cloudflared https URL (see tools/serve_setup.sh), or add the LAN
+  origin to chrome://flags/#unsafely-treat-insecure-origin-as-secure.
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>QODUCK 配网</title>
+<style>
+  :root {
+    --bg: #0b0d11;
+    --card: #151920;
+    --line: #242a34;
+    --fg: #e8ecf3;
+    --dim: #8b94a3;
+    --accent: #ff7a45;   /* Qoder 橙 */
+    --ok: #3ddc97;
+    --bad: #ff5f56;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0; padding: 20px 16px 40px;
+    background: var(--bg); color: var(--fg);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "PingFang SC", "Noto Sans SC", sans-serif;
+    max-width: 520px; margin-inline: auto;
+  }
+  h1 { font-size: 20px; margin: 0 0 2px; letter-spacing: .3px; }
+  .sub { color: var(--dim); font-size: 13px; margin-bottom: 18px; }
+  .card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 14px; padding: 16px; margin-bottom: 14px;
+  }
+  .card h2 {
+    font-size: 13px; font-weight: 600; color: var(--dim);
+    text-transform: uppercase; letter-spacing: .8px; margin: 0 0 12px;
+  }
+  label { display: block; font-size: 12px; color: var(--dim); margin: 10px 0 5px; }
+  label:first-of-type { margin-top: 0; }
+  input {
+    width: 100%; padding: 12px 13px; font-size: 16px; /* 16px 防 iOS 缩放 */
+    background: #0e1218; color: var(--fg);
+    border: 1px solid var(--line); border-radius: 10px;
+    font-family: inherit;
+  }
+  input:focus { outline: none; border-color: var(--accent); }
+  button {
+    width: 100%; padding: 13px; font-size: 15px; font-weight: 600;
+    border: none; border-radius: 10px; font-family: inherit;
+    background: var(--accent); color: #1a0d05; margin-top: 14px;
+  }
+  button:active { transform: scale(.985); }
+  button.ghost {
+    background: transparent; color: var(--fg);
+    border: 1px solid var(--line); font-weight: 500;
+  }
+  button:disabled { opacity: .45; }
+  .row { display: flex; gap: 10px; }
+  .row > * { flex: 1; }
+  #conn {
+    display: flex; align-items: center; gap: 9px;
+    font-size: 13px; color: var(--dim); margin-bottom: 14px;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bad); flex: none; }
+  .dot.on { background: var(--ok); box-shadow: 0 0 10px var(--ok); }
+  #log {
+    background: #080a0e; border: 1px solid var(--line); border-radius: 10px;
+    padding: 11px 12px; font: 12px/1.7 ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: var(--dim); max-height: 220px; overflow-y: auto; white-space: pre-wrap;
+    word-break: break-all;
+  }
+  #log b { color: var(--fg); font-weight: 600; }
+  #log .ok { color: var(--ok); }
+  #log .bad { color: var(--bad); }
+  .hint { font-size: 12px; color: var(--dim); margin-top: 9px; line-height: 1.6; }
+  .hint a { color: #6ea8fe; text-decoration: none; }
+  .hint a:hover { text-decoration: underline; }
+  .step { color: var(--accent); font-weight: 600; }
+</style>
+</head>
+<body>
+
+<h1>QODUCK 配网</h1>
+<div class="sub">手机蓝牙直连小音箱，不用在 1.3 寸屏上敲密码</div>
+
+<div id="conn"><span class="dot" id="dot"></span><span id="connText">未连接</span></div>
+
+<div class="card">
+  <h2>1 · 连接设备</h2>
+  <button id="btnConnect">搜索附近的 QODUCK</button>
+  <button id="btnConnectAll" class="ghost" style="margin-top:10px">搜不到？显示全部蓝牙设备</button>
+  <div class="hint">
+    设备屏幕会显示 <span class="step">6 位配对码</span>，在系统弹窗里输入即可。
+    连不上就把滚轮菜单里的「手机配对」切到 <b>开</b>。
+  </div>
+</div>
+
+<div class="card" id="wifiCard">
+  <h2>2 · 无线网络</h2>
+  <label for="ssid">Wi-Fi 名称</label>
+  <input id="ssid" autocapitalize="off" autocorrect="off" placeholder="公司或家里的 Wi-Fi">
+  <label for="pass">密码</label>
+  <input id="pass" type="password" placeholder="留空表示开放网络">
+  <button id="btnWifi" disabled>连接 Wi-Fi</button>
+</div>
+
+<div class="card">
+  <h2>3 · Qoder 账号</h2>
+  <label for="token">Access token</label>
+  <input id="token" autocapitalize="off" autocorrect="off" placeholder="pt-...">
+  <p class="hint">在哪拿：<a href="https://qoder.com/cloud/pat-keys" target="_blank" rel="noopener">qoder.com/cloud/pat-keys</a>
+    （国内 <a href="https://qoder.com.cn/cloud/pat-keys" target="_blank" rel="noopener">qoder.com.cn/cloud/pat-keys</a>）。
+    token 分站点，连哪个站就在哪个站建。</p>
+  <button id="btnToken" class="ghost" disabled>保存 token</button>
+</div>
+
+<div class="card">
+  <h2>4 · 设备状态</h2>
+  <div id="log">连接后自动读取…</div>
+  <div class="row">
+    <button id="btnStatus" class="ghost" disabled>刷新</button>
+    <button id="btnTest" class="ghost" disabled>测试连接</button>
+  </div>
+</div>
+
+<script>
+const SVC    = '4d757365-0001-4000-8000-6a6f6c6c7900';
+const CMD    = '4d757365-0002-4000-8000-6a6f6c6c7900';
+const STATUS = '4d757365-0003-4000-8000-6a6f6c6c7900';
+const CHUNK  = 180;   // 稳妥的分片大小，兼容小 MTU
+
+let device = null, cmdChar = null, statusChar = null;
+const $ = id => document.getElementById(id);
+
+function log(msg, cls) {
+  const t = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+  const color = cls ? ` class="${cls}"` : '';
+  $('log').insertAdjacentHTML('afterbegin',
+    `<div><b>${t}</b> <span${color}>${msg}</span></div>`);
+}
+
+function setConnected(on, name) {
+  $('dot').classList.toggle('on', on);
+  $('connText').textContent = on ? `已连接 ${name || ''}` : '未连接';
+  for (const id of ['btnWifi', 'btnToken', 'btnStatus', 'btnTest']) {
+    $(id).disabled = !on;
+  }
+}
+
+/* CMD 是一条纯文本 "key=value"；长值（token）按块写，首块 replace，其余 append。 */
+async function send(key, value) {
+  if (!cmdChar) return;
+  const payload = `${key}=${value}`;
+  if (payload.length <= CHUNK) {
+    await cmdChar.writeValue(new TextEncoder().encode(payload));
+    return;
+  }
+  // 第一个分片不带 '+'（覆盖旧值），后续带 '+'（追加）
+  const first = value.slice(0, CHUNK);
+  await cmdChar.writeValue(new TextEncoder().encode(`${key}=${first}`));
+  for (let i = CHUNK; i < value.length; i += CHUNK) {
+    await cmdChar.writeValue(new TextEncoder().encode(`${key}+=${value.slice(i, i + CHUNK)}`));
+  }
+}
+
+
+
+$('btnConnect').onclick = () => connect({ filters: [{ namePrefix: 'Qoduck' }] });
+$('btnConnectAll').onclick = () => connect({ acceptAllDevices: true });
+
+async function connect(filter) {
+  if (!navigator.bluetooth) {
+    log('这个浏览器不支持 Web Bluetooth，请用 Chrome', 'bad');
+    return;
+  }
+  try {
+    $('btnConnect').disabled = true;
+    $('btnConnectAll').disabled = true;
+    log('搜索中…');
+    // 不能按 service 过滤：main/ble_server.c 的广播里只带 Link 服务
+    // (7fdd3d1c-...)，CMD/STATUS 的 4d757365-... 不在广播里。设备名在 scan
+    // response 里（"Qoduck-XXXXXX"），所以按名字前缀过滤。
+    device = await navigator.bluetooth.requestDevice(Object.assign({}, filter, {
+      optionalServices: [SVC],
+    }));
+    device.addEventListener('gattserverdisconnected', () => {
+      setConnected(false);
+      log('连接已断开', 'bad');
+    });
+    log(`找到 ${device.name || '设备'}，正在连接…`);
+    const server = await device.gatt.connect();
+    const svc = await server.getPrimaryService(SVC);
+    cmdChar = await svc.getCharacteristic(CMD);
+    statusChar = await svc.getCharacteristic(STATUS);
+
+    await statusChar.startNotifications();
+    statusChar.addEventListener('characteristicvaluechanged', ev => {
+      const text = new TextDecoder().decode(ev.target.value);
+      log(`状态 → ${text}`);
+      try { showStatus(JSON.parse(text)); } catch { /* 有的回包是短结果 */ }
+    });
+
+    setConnected(true, device.name);
+    log('已连接', 'ok');
+    await readStatus();
+  } catch (e) {
+    log(`连接失败：${e.message}`, 'bad');
+  } finally {
+    $('btnConnect').disabled = false;
+    $('btnConnectAll').disabled = false;
+  }
+}
+
+async function readStatus() {
+  if (!statusChar) return;
+  const v = await statusChar.readValue();
+  const text = new TextDecoder().decode(v);
+  log(`状态 → ${text}`);
+  try { showStatus(JSON.parse(text)); } catch {}
+}
+
+function showStatus(s) {
+  const lines = [];
+  if (s.name) lines.push(`设备: ${s.name} · ${s.fw || ''}`);
+  if (s.battery !== undefined) lines.push(`电量: ${s.battery}%`);
+  if (s.wifi) {
+    lines.push(`Wi-Fi: ${s.wifi.ssid || '(未设置)'} · ${s.wifi.state || '-'}` +
+               (s.wifi.ip ? ` · ${s.wifi.ip}` : '') + (s.wifi.rssi ? ` · ${s.wifi.rssi}dBm` : ''));
+  }
+  if (s.hatch) {
+    lines.push(`Qoder: ${s.hatch.state || '-'} · token ${s.hatch.token ? '已存' : '没有'}`);
+  }
+  if (s.link) lines.push(`链路: ${s.link.state || '-'}`);
+  if (s.volume !== undefined) lines.push(`音量 ${s.volume} · 亮度 ${s.brightness} · 息屏 ${s.sleep}s`);
+  if (lines.length) $('log').insertAdjacentHTML('afterbegin',
+    `<div class="ok">${lines.join('<br>')}</div>`);
+}
+
+$('btnWifi').onclick = async () => {
+  const ssid = $('ssid').value.trim();
+  const pass = $('pass').value;
+  if (!ssid) { log('先填 Wi-Fi 名称', 'bad'); return; }
+  try {
+    log(`发送 Wi-Fi：${ssid}`);
+    await send('wifi.ssid', ssid);
+    if (pass) await send('wifi.pass', pass);
+    await send('wifi.connect', '');
+    log('已提交，等设备连上（约 5~10 秒）', 'ok');
+    setTimeout(readStatus, 8000);
+  } catch (e) { log(`失败：${e.message}`, 'bad'); }
+};
+
+$('btnToken').onclick = async () => {
+  const t = $('token').value.trim();
+  if (!t) { log('token 是空的', 'bad'); return; }
+  if (!t.startsWith('pt-')) log('注意：Qoder token 通常以 pt- 开头');
+  try {
+    log(`发送 token（${t.length} 字符）`);
+    await send('hatch.token', t);
+    log('token 已保存', 'ok');
+    await readStatus();
+  } catch (e) { log(`失败：${e.message}`, 'bad'); }
+};
+
+$('btnStatus').onclick = () => readStatus().catch(e => log(e.message, 'bad'));
+$('btnTest').onclick = async () => {
+  try { await send('hatch.test', ''); log('已发起连通性测试，结果稍后通知'); }
+  catch (e) { log(e.message, 'bad'); }
+};
+
+if (!navigator.bluetooth) {
+  log('这个浏览器不支持 Web Bluetooth（iOS Safari 不支持，请用 Android Chrome）', 'bad');
+  $('btnConnect').disabled = true;
+} else {
+  log('点上面的按钮搜索设备。搜不到就把滚轮菜单「手机配对」切到 开');
+}
+</script>
+</body>
+</html>

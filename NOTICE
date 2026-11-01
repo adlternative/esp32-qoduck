@@ -1,0 +1,10 @@
+Qoduck
+Copyright 2026 ZheNing Hu
+
+This product includes software developed as part of muse-gadget-sdk
+(https://github.com/facebookincubator/muse-gadget-sdk),
+Copyright Meta Platforms, Inc. and affiliates, licensed under the Apache License 2.0.
+
+Modifications for this fork: the Muse cloud link was removed and replaced with a
+Qoder Cloud Agents realtime voice link (https://docs.qoder.com), together with
+on-device Chinese UI, BLE Wi-Fi/token provisioning and the SenseCAP Watcher board profile.
